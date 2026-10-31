@@ -1,0 +1,13 @@
+# Java
+ms-productos-java/target/
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+coverage.xml
+htmlcov/
+reports/
+# IDE
+.idea/
+.vscode/
+.coverage
