@@ -1,0 +1,55 @@
+# Orquestacion de los microservicios.
+# Local:   docker compose up -d --build
+# CI/CD:   REGISTRY=ghcr.io/<usuario> IMAGE_TAG=<sha> docker compose up -d --no-build --wait
+services:
+  ms-productos:
+    build: ./ms-productos-java
+    image: ${REGISTRY:-local}/ms-productos:${IMAGE_TAG:-latest}
+
+    expose:
+      - "8081"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    networks:
+      - backend
+
+  ms-pedidos:
+    build: ./ms-pedidos-python
+    image: ${REGISTRY:-local}/ms-pedidos:${IMAGE_TAG:-latest}
+    environment:
+      PRODUCTOS_URL: http://ms-productos:8081
+    expose:
+      - "8000"
+    depends_on:
+      ms-productos:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: 2          # escalabilidad horizontal
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    networks:
+      - backend
+
+  gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      ms-pedidos:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
