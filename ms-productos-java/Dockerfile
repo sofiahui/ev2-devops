@@ -8,7 +8,7 @@ COPY src ./src
 RUN mvn -B package -DskipTests
 
 # ---------- Etapa 2: imagen final liviana ----------
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:24-jre-alpine
 WORKDIR /app
 # Usuario sin privilegios (seguridad)
 RUN addgroup -S app && adduser -S app -G app
