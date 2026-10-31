@@ -1,5 +1,5 @@
 #  ---------- Etapa 1: compilar ----------
-FROM maven:3.9-eclipse-temurin-21 AS build
+FROM maven:3.9-eclipse-temurin-26 AS build
 WORKDIR /app
 # Copiamos primero el pom para aprovechar la cache de dependencias
 COPY pom.xml .
