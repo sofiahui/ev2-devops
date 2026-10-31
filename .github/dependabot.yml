@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: "maven"
+    directory: "/ms-productos-java"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencias", "java"]
+
+  - package-ecosystem: "pip"
+    directory: "/ms-pedidos-python"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencias", "python"]
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/ms-productos-java"
+      - "/ms-pedidos-python"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencias", "docker"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencias", "ci"]
