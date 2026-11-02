@@ -158,7 +158,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build ms-productos (Java)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./ms-productos-java
           push: ${{ github.event_name == 'push' }}
@@ -172,7 +172,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=productos
 
       - name: Build ms-pedidos (Python)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./ms-pedidos-python
           push: ${{ github.event_name == 'push' }}
