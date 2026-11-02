@@ -1,0 +1,246 @@
+name: CI-CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------
+  # 1. PRUEBAS UNITARIAS + COBERTURA
+  # ---------------------------------------------------------------
+  test-java:
+    name: Tests Java (JUnit + JaCoCo)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ms-productos-java
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # verify ejecuta los tests y jacoco:check (falla si la cobertura < 80%)
+      - name: Ejecutar pruebas y verificar cobertura
+        run: mvn -B verify
+      - name: Publicar reporte JaCoCo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: ms-productos-java/target/site/jacoco
+
+  test-python:
+    name: Tests Python (PyTest + coverage)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ms-pedidos-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: ms-pedidos-python/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      # pytest.ini define --cov-fail-under=80
+      - name: Ejecutar pruebas y verificar cobertura
+        run: pytest --cov-report=html --junitxml=reports/junit.xml
+      - name: Publicar reporte de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: |
+            ms-pedidos-python/htmlcov
+            ms-pedidos-python/coverage.xml
+            ms-pedidos-python/reports
+
+  # ---------------------------------------------------------------
+  # 2. ANALISIS DE SEGURIDAD (Snyk) - bloquea el pipeline si falla
+  # ---------------------------------------------------------------
+  security:
+    name: Analisis de seguridad (Snyk)
+    runs-on: ubuntu-latest
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Instalar dependencias Python (Snyk las necesita)
+        run: pip install -r ms-pedidos-python/requirements.txt
+
+      - name: Verificar que existe SNYK_TOKEN
+        if: env.SNYK_TOKEN == ''
+        run: |
+          echo "::error title=Falta SNYK_TOKEN::Configura el secreto SNYK_TOKEN en Settings > Secrets and variables > Actions"
+          exit 1
+
+      - uses: snyk/actions/setup@master
+
+      - name: Snyk - escaneo de dependencias (Maven + pip)
+        run: snyk test --all-projects --severity-threshold=high
+
+      - name: Snyk Code - analisis estatico del codigo
+        run: snyk code test --severity-threshold=high
+
+      - name: Mensaje de fallo de seguridad
+        if: failure()
+        run: |
+          echo "::error title=Analisis de seguridad FALLIDO::Snyk encontro vulnerabilidades de severidad alta o critica. El build y el despliegue fueron BLOQUEADOS."
+          {
+            echo "## :x: Analisis de seguridad fallido"
+            echo ""
+            echo "Snyk detecto vulnerabilidades **high/critical**."
+            echo "El pipeline se detuvo: **no se construyeron imagenes ni se desplego**."
+            echo ""
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- Autor: ${{ github.actor }}"
+            echo "- Revisa el log del paso Snyk para ver el detalle y la version que corrige."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Alerta: crea un Issue en el repositorio cuando falla la seguridad
+  alerta-seguridad:
+    name: Alerta de seguridad
+    needs: security
+    if: failure() && needs.security.result == 'failure' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Seguridad: analisis fallido en ${context.sha.substring(0, 7)}`,
+              body: `El analisis de Snyk fallo en el commit ${context.sha}.\n\n` +
+                    `Ejecucion: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n` +
+                    `El despliegue fue bloqueado hasta corregir las vulnerabilidades.`
+            });
+
+  # ---------------------------------------------------------------
+  # 3. CONSTRUCCION DE IMAGENES DOCKER (solo si tests y seguridad OK)
+  # ---------------------------------------------------------------
+  build:
+    name: Build imagenes Docker
+    needs: [test-java, test-python, security]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Nombre del registro en minusculas
+        run: echo "REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - name: Login a GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build ms-productos (Java)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ms-productos-java
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ env.REGISTRY }}/ms-productos:${{ github.sha }}
+            ${{ env.REGISTRY }}/ms-productos:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=productos
+          cache-to: type=gha,mode=max,scope=productos
+
+      - name: Build ms-pedidos (Python)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ms-pedidos-python
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ env.REGISTRY }}/ms-pedidos:${{ github.sha }}
+            ${{ env.REGISTRY }}/ms-pedidos:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=pedidos
+          cache-to: type=gha,mode=max,scope=pedidos
+
+  # ---------------------------------------------------------------
+  # 4. DESPLIEGUE AUTOMATICO EN ENTORNO SIMULADO (Docker Compose)
+  # ---------------------------------------------------------------
+  deploy:
+    name: Deploy (Docker Compose)
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: produccion-simulada
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Nombre del registro en minusculas
+        run: echo "REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Descargar imagenes del commit ${{ github.sha }}
+        run: docker compose pull ms-productos ms-pedidos
+
+      - name: Levantar el sistema
+        run: docker compose up -d --no-build --wait --wait-timeout 180
+
+      - name: Estado de los contenedores
+        run: docker compose ps
+
+      - name: Pruebas de humo
+        run: |
+          curl -fsS http://localhost:8080/health
+          curl -fsS http://localhost:8080/productos/health
+          curl -fsS http://localhost:8080/api/productos
+          curl -fsS -X POST http://localhost:8080/pedidos \
+            -H "Content-Type: application/json" \
+            -d '{"producto_id": 1, "cantidad": 1}'
+
+      - name: Logs si algo falla
+        if: failure()
+        run: docker compose logs
+
+      - name: Resumen del despliegue
+        run: |
+          {
+            echo "## :rocket: Despliegue exitoso"
+            echo "| Servicio | Imagen |"
+            echo "|---|---|"
+            echo "| ms-productos | \`$REGISTRY/ms-productos:$IMAGE_TAG\` |"
+            echo "| ms-pedidos | \`$REGISTRY/ms-pedidos:$IMAGE_TAG\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bajar el entorno
+        if: always()
+        run: docker compose down
