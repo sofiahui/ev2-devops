@@ -19,6 +19,8 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- Fuerza Jackson 3.1.8: corrige SNYK-JAVA-TOOLSJACKSONCORE-21761838 -->
+        <jackson-bom.version>3.1.8</jackson-bom.version>
         <jacoco.version>0.8.16</jacoco.version>
         <!-- Politica de calidad: cobertura minima de lineas -->
         <jacoco.minimo>0.80</jacoco.minimo>
