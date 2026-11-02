@@ -19,9 +19,15 @@ updates:
     schedule:
       interval: "weekly"
     labels: ["dependencias", "docker"]
+    ignore:
+      - dependency-name: "eclipse-temurin"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "maven"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     labels: ["dependencias", "ci"]
+    
