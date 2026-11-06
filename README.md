@@ -53,6 +53,10 @@ curl http://localhost:8080/api/productos
 docker compose down
 ```
 
+## Evidencia
+
+Las capturas del pipeline y del despliegue están en evidencias/evidencia-ep2.pdf.
+
 ## Uso de IA
 
 Usamos Claude como apoyo para armar el código y entender algunos errores del pipeline.
